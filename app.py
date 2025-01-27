@@ -65,43 +65,51 @@ def convert_pdf_to_images(pdf_path: str) -> List[Image.Image]:
         raise FileNotFoundError(f"PDF file not found: {pdf_path}")
     
     try:
-        # Try with each possible Poppler path
+        # Additional Poppler paths to check
         poppler_paths = [
-            None,  # Default path
+            None,
             '/usr/bin',
             '/usr/local/bin',
             '/opt/homebrew/bin',
             '/usr/lib/x86_64-linux-gnu',
-            '/snap/bin'
+            '/snap/bin',
+            '/app/.apt/usr/bin',  # Streamlit Cloud specific path
+            '/usr/share/poppler'
         ]
 
-        last_error = None
+        errors = []
         for poppler_path in poppler_paths:
             try:
+                st.info(f"Trying Poppler path: {poppler_path}")
                 pages = convert_from_path(
                     pdf_path,
                     dpi=DPI,
                     size=(MAX_WIDTH, None),
                     poppler_path=poppler_path,
-                    use_pdftocairo=True,  # Try using pdftocairo first
+                    use_pdftocairo=True,
+                    grayscale=True,  # Reduce memory usage
+                    fmt='jpeg',      # More reliable format
+                    thread_count=2   # Limit thread usage
                 )
                 return [resize_image(page) for page in pages]
             except Exception as e:
-                last_error = e
+                errors.append(f"Path {poppler_path}: {str(e)}")
                 continue
-                
-        raise Exception(f"Failed to convert PDF with error: {str(last_error)}")
-            
+
+        # If we get here, all paths failed
+        error_msg = "\n".join(errors)
+        st.error(f"Failed to convert PDF. Tried following paths:\n{error_msg}")
+        raise Exception("No working Poppler installation found")
+
     except Exception as e:
-        st.error("PDF conversion failed. Checking Poppler installation...")
-        # Try to detect poppler installation
-        if shutil.which('pdftoppm') is None and shutil.which('pdftocairo') is None:
+        # Check for common Poppler issues
+        if "pdftoppm" in str(e) or "poppler" in str(e).lower():
             st.error("""
-            Poppler is not installed or not found. Please wait while the system installs it.
-            If this persists, try:
-            1. Refreshing the page
-            2. Uploading a different PDF file
-            3. Contact support if the issue continues
+            Poppler installation error. The system will attempt to:
+            1. Install required system packages
+            2. Set up proper paths
+            3. Configure Poppler
+            Please wait a moment and refresh the page.
             """)
         raise Exception(f"PDF conversion failed: {str(e)}")
 
@@ -217,24 +225,25 @@ Extract the text exactly as it appears in the document:"""
 def check_dependencies():
     """Check if required system dependencies are installed"""
     try:
-        # Create a minimal test PDF
-        test_pdf = tempfile.NamedTemporaryFile(delete=False, suffix='.pdf')
-        test_pdf.write(b"%PDF-1.7\n1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj 2 0 obj<</Type/Pages/Kids[3 0 R]/Count 1>>endobj 3 0 obj<</Type/Page/MediaBox[0 0 3 3]>>endobj xref 0 4 0000000000 65535 f 0000000010 00000 n 0000000053 00000 n 0000000102 00000 n trailer<</Size 4/Root 1 0 R>>startxref 149 %%EOF")
-        test_pdf.close()
+        # Check for Poppler executables
+        poppler_cmds = ['pdftoppm', 'pdftocairo', 'pdfinfo']
+        missing_cmds = [cmd for cmd in poppler_cmds if not shutil.which(cmd)]
         
-        try:
-            # Test PDF conversion
-            _ = convert_pdf_to_images(test_pdf.name)
-            return True
-        finally:
-            os.unlink(test_pdf.name)
+        if missing_cmds:
+            st.error(f"""
+            Missing Poppler commands: {', '.join(missing_cmds)}
+            Installing required dependencies...
+            Please wait and refresh the page after installation completes.
+            """)
+            return False
             
+        return True
+        
     except Exception as e:
         st.error(f"""
-        PDF processing dependency error: {str(e)}
-        The application requires poppler-utils to be installed.
-        System will attempt to install required dependencies.
-        Please wait a moment and refresh the page.
+        Dependency check failed: {str(e)}
+        Installing required packages...
+        Please wait and refresh the page.
         """)
         return False
 
