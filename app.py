@@ -150,21 +150,29 @@ Extract the text exactly as it appears in the document:"""
 def check_dependencies():
     """Check if required system dependencies are installed"""
     try:
-        # First try using pdf2image directly
-        pages = convert_from_path(
-            BytesIO(b"%PDF-1.7\n"),  # Minimal valid PDF
-            dpi=72,
-            size=(100, None)
-        )
-        return True
+        # Create a minimal test PDF file
+        test_pdf = tempfile.NamedTemporaryFile(delete=False, suffix='.pdf')
+        test_pdf.write(b"%PDF-1.7\n")  # Minimal valid PDF content
+        test_pdf.close()
+        
+        try:
+            # Try converting the test PDF
+            _ = convert_from_path(
+                test_pdf.name,
+                dpi=72,
+                size=(100, None)
+            )
+            return True
+        finally:
+            # Clean up the test file
+            os.unlink(test_pdf.name)
+            
     except Exception as e:
         if "poppler" in str(e).lower():
             st.error("""
-            ⚠️ Poppler is not installed. The app will attempt to install it automatically.
-            If this persists, try manually installing:
-            - Ubuntu/Debian: sudo apt-get install poppler-utils
-            - MacOS: brew install poppler
-            - Windows: included in python-poppler-binary
+            ⚠️ Poppler is not installed or not properly configured.
+            The application requires poppler-utils to be installed.
+            Please wait while the system installs required dependencies.
             """)
         else:
             st.error(f"Dependency check failed: {str(e)}")
