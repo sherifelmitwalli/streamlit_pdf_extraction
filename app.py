@@ -271,7 +271,6 @@ def main():
 
         try:
             status_text.text("Converting PDF to images...")
-            st.info("Please try again with a different PDF file or contact support.")
             pages = convert_pdf_to_images(temp_pdf_path)
             total_pages = len(pages)
 
@@ -285,6 +284,16 @@ def main():
                 progress_bar.progress(progress)
                 status_text.text(f"Processing page {i + 1} of {total_pages}...")
                 
+                text = describe_image_with_vision(client, page, i)
+                extracted_texts.append(f"=== Page {i + 1} ===\n{text}")
+
+            final_text = "\n\n".join(extracted_texts)
+            progress_bar.progress(1.0)
+            status_text.text("Processing complete!")
+
+            st.success(f"Successfully processed {total_pages} pages!")
+
+            # Preview section
             with st.expander("Preview extracted text", expanded=True):
                 st.text_area("Extracted Text Preview", final_text, height=300)
 
@@ -299,15 +308,6 @@ def main():
         except Exception as e:
             st.error(f"Error: {str(e)}")
             st.info("Please try again with a different PDF file or contact support.")
-
-        finally:
-            try:
-                os.unlink(temp_pdf_path)
-            except Exception:
-                pass
-
-if __name__ == "__main__":
-    main()
 
         finally:
             try:
