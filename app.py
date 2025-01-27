@@ -65,52 +65,16 @@ def convert_pdf_to_images(pdf_path: str) -> List[Image.Image]:
         raise FileNotFoundError(f"PDF file not found: {pdf_path}")
     
     try:
-        # Additional Poppler paths to check
-        poppler_paths = [
-            None,
-            '/usr/bin',
-            '/usr/local/bin',
-            '/opt/homebrew/bin',
-            '/usr/lib/x86_64-linux-gnu',
-            '/snap/bin',
-            '/app/.apt/usr/bin',  # Streamlit Cloud specific path
-            '/usr/share/poppler'
-        ]
-
-        errors = []
-        for poppler_path in poppler_paths:
-            try:
-                st.info(f"Trying Poppler path: {poppler_path}")
-                pages = convert_from_path(
-                    pdf_path,
-                    dpi=DPI,
-                    size=(MAX_WIDTH, None),
-                    poppler_path=poppler_path,
-                    use_pdftocairo=True,
-                    grayscale=True,  # Reduce memory usage
-                    fmt='jpeg',      # More reliable format
-                    thread_count=2   # Limit thread usage
-                )
-                return [resize_image(page) for page in pages]
-            except Exception as e:
-                errors.append(f"Path {poppler_path}: {str(e)}")
-                continue
-
-        # If we get here, all paths failed
-        error_msg = "\n".join(errors)
-        st.error(f"Failed to convert PDF. Tried following paths:\n{error_msg}")
-        raise Exception("No working Poppler installation found")
-
+        # Simplified conversion with default settings
+        pages = convert_from_path(
+            pdf_path,
+            dpi=DPI,
+            size=(MAX_WIDTH, None),
+            grayscale=True,
+            fmt='jpeg'
+        )
+        return [resize_image(page) for page in pages]
     except Exception as e:
-        # Check for common Poppler issues
-        if "pdftoppm" in str(e) or "poppler" in str(e).lower():
-            st.error("""
-            Poppler installation error. The system will attempt to:
-            1. Install required system packages
-            2. Set up proper paths
-            3. Configure Poppler
-            Please wait a moment and refresh the page.
-            """)
         raise Exception(f"PDF conversion failed: {str(e)}")
 
 def encode_image(image: Any) -> str:
@@ -225,26 +189,16 @@ Extract the text exactly as it appears in the document:"""
 def check_dependencies():
     """Check if required system dependencies are installed"""
     try:
-        # Check for Poppler executables
-        poppler_cmds = ['pdftoppm', 'pdftocairo', 'pdfinfo']
-        missing_cmds = [cmd for cmd in poppler_cmds if not shutil.which(cmd)]
-        
-        if missing_cmds:
-            st.error(f"""
-            Missing Poppler commands: {', '.join(missing_cmds)}
-            Installing required dependencies...
-            Please wait and refresh the page after installation completes.
+        # Check for pdftoppm (main poppler utility we need)
+        if not shutil.which('pdftoppm'):
+            st.error("""
+            Poppler is not installed. Please wait while the system installs it.
+            The app will be ready after installation completes.
             """)
             return False
-            
         return True
-        
     except Exception as e:
-        st.error(f"""
-        Dependency check failed: {str(e)}
-        Installing required packages...
-        Please wait and refresh the page.
-        """)
+        st.error(f"Dependency check failed: {str(e)}")
         return False
 
 def main():
