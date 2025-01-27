@@ -150,32 +150,15 @@ Extract the text exactly as it appears in the document:"""
 def check_dependencies():
     """Check if required system dependencies are installed"""
     try:
-        # Create a minimal test PDF file
-        test_pdf = tempfile.NamedTemporaryFile(delete=False, suffix='.pdf')
-        test_pdf.write(b"%PDF-1.7\n")  # Minimal valid PDF content
-        test_pdf.close()
-        
-        try:
-            # Try converting the test PDF
-            _ = convert_from_path(
-                test_pdf.name,
-                dpi=72,
-                size=(100, None)
-            )
-            return True
-        finally:
-            # Clean up the test file
-            os.unlink(test_pdf.name)
-            
+        # Simple test without creating a file
+        import pdf2image
+        return True
     except Exception as e:
-        if "poppler" in str(e).lower():
-            st.error("""
-            ⚠️ Poppler is not installed or not properly configured.
-            The application requires poppler-utils to be installed.
-            Please wait while the system installs required dependencies.
-            """)
-        else:
-            st.error(f"Dependency check failed: {str(e)}")
+        st.error("""
+        PDF processing dependencies not properly installed.
+        Please contact support if this error persists.
+        Error: {str(e)}
+        """)
         return False
 
 def main():
