@@ -6,3 +6,4 @@ pillow>=10.1.0
 PyPDF2==3.0.1
 pydantic>=2.5.2
 poppler-utils
+
