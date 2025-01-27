@@ -149,13 +149,26 @@ Extract the text exactly as it appears in the document:"""
 
 def check_dependencies():
     """Check if required system dependencies are installed"""
-    if not shutil.which('pdftoppm'):
-        st.error("""
-        Required system dependency 'poppler-utils' is not installed.
-        The application will install it automatically.
-        Please wait a moment and try again.
-        """)
-        st.stop()
+    try:
+        # First try using pdf2image directly
+        pages = convert_from_path(
+            BytesIO(b"%PDF-1.7\n"),  # Minimal valid PDF
+            dpi=72,
+            size=(100, None)
+        )
+        return True
+    except Exception as e:
+        if "poppler" in str(e).lower():
+            st.error("""
+            ⚠️ Poppler is not installed. The app will attempt to install it automatically.
+            If this persists, try manually installing:
+            - Ubuntu/Debian: sudo apt-get install poppler-utils
+            - MacOS: brew install poppler
+            - Windows: included in python-poppler-binary
+            """)
+        else:
+            st.error(f"Dependency check failed: {str(e)}")
+        return False
 
 def main():
     try:
@@ -165,8 +178,9 @@ def main():
         st.error("Failed to connect to API. Please check your credentials and connection.")
         st.stop()
         
-    # Check dependencies first
-    check_dependencies()
+    # Check dependencies first, before showing UI
+    if not check_dependencies():
+        st.stop()
     
     st.set_page_config(page_title="PDF Text Extractor", page_icon="📄")
 
