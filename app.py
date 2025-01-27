@@ -37,15 +37,33 @@ def resize_image(image: Image.Image, max_size: int = MAX_IMAGE_SIZE) -> Image.Im
 
 def convert_pdf_to_images(pdf_path: str) -> List[Image.Image]:
     """Convert PDF pages to images using PyMuPDF"""
-    pdf_document = fitz.open(pdf_path)
-    images = []
-    for page_num in range(len(pdf_document)):
-        page = pdf_document[page_num]
-        pix = page.get_pixmap()
-        img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
-        images.append(img)
-    pdf_document.close()
-    return images
+    try:
+        with st.spinner("Opening PDF file..."):
+            pdf_document = fitz.open(pdf_path)
+            total_pages = len(pdf_document)
+            st.info(f"Found {total_pages} pages in PDF")
+            
+            images = []
+            progress_bar = st.progress(0)
+            
+            for page_num in range(total_pages):
+                progress = (page_num + 1) / total_pages
+                progress_bar.progress(progress)
+                
+                page = pdf_document[page_num]
+                pix = page.get_pixmap(matrix=fitz.Matrix(2, 2))
+                img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
+                images.append(resize_image(img))
+                
+            pdf_document.close()
+            return images
+    except ImportError:
+        st.error("Error: PyMuPDF (fitz) is not properly installed. Please check your installation.")
+        st.stop()
+    except Exception as e:
+        st.error(f"Error processing PDF: {str(e)}")
+        st.info("If the error persists, try a different PDF file or contact support.")
+        raise
 
 def encode_image(image: Any) -> str:
     """Convert image to base64 string"""
@@ -125,6 +143,9 @@ def main():
             st.error("File size exceeds 10MB limit.")
             return
 
+        progress_text = st.empty()
+        progress_text.text("Preparing PDF processing...")
+
         # Save the uploaded file temporarily
         with tempfile.NamedTemporaryFile(delete=False, suffix='.pdf') as temp_pdf:
             temp_pdf.write(uploaded_file.getvalue())
@@ -133,21 +154,31 @@ def main():
         try:
             # Convert PDF to images
             pages = convert_pdf_to_images(temp_pdf_path)
-            total_pages = len(pages)
+            
+            if not pages:
+                st.error("No pages could be extracted from the PDF.")
+                return
 
-            st.write(f"Processing {total_pages} page(s)...")
-
-            extracted_text = ""
+            extracted_text = []
+            progress_bar = st.progress(0)
+            
             for i, page in enumerate(pages):
-                st.write(f"Processing page {i + 1} of {total_pages}...")
+                progress = (i + 1) / len(pages)
+                progress_bar.progress(progress)
+                progress_text.text(f"Processing page {i + 1} of {len(pages)}...")
+                
                 text = describe_image_with_vision(client, page, i)
-                extracted_text += f"=== Page {i + 1} ===\n{text}\n\n"
+                extracted_text.append(f"=== Page {i + 1} ===\n{text}")
+
+            final_text = "\n\n".join(extracted_text)
+            progress_text.text("Processing complete!")
+            progress_bar.progress(1.0)
 
             st.success("Text extraction completed!")
 
             st.download_button(
                 label="Download Extracted Text",
-                data=extracted_text,
+                data=final_text,
                 file_name="extracted_text.txt",
                 mime="text/plain"
             )
