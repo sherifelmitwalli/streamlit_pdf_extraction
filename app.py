@@ -137,6 +137,14 @@ Remember: Accuracy in headers and tables is CRITICAL. Extract EVERYTHING exactly
         st.error(f"API Error on page {page_num + 1}: {str(e)}")
         raise  # This will trigger the retry mechanism
 
+def read_file_in_chunks(file_obj, chunk_size=CHUNK_SIZE):
+    """Read file in chunks"""
+    while True:
+        data = file_obj.read(chunk_size)
+        if not data:
+            break
+        yield data
+
 # Main Streamlit App
 def main():
     st.set_page_config(
@@ -169,8 +177,13 @@ def main():
         # Save the uploaded file in chunks
         with tempfile.NamedTemporaryFile(delete=False, suffix='.pdf') as temp_pdf:
             temp_pdf_path = temp_pdf.name
-            for chunk in uploaded_file.chunks(CHUNK_SIZE):
-                temp_pdf.write(chunk)
+            try:
+                # Read and write in chunks
+                for chunk in read_file_in_chunks(uploaded_file):
+                    temp_pdf.write(chunk)
+            except Exception as e:
+                st.error(f"Error saving file: {str(e)}")
+                return
 
         try:
             # Convert PDF to images
