@@ -65,34 +65,44 @@ def convert_pdf_to_images(pdf_path: str) -> List[Image.Image]:
         raise FileNotFoundError(f"PDF file not found: {pdf_path}")
     
     try:
-        # First try with direct path
-        try:
-            pages = convert_from_path(
-                pdf_path,
-                dpi=DPI,
-                size=(MAX_WIDTH, None),
-                poppler_path=None  # Let pdf2image find poppler
-            )
-        except Exception as e:
-            if "poppler" in str(e).lower():
-                # Try alternative paths
-                for poppler_path in ['/usr/bin', '/usr/local/bin', '/opt/homebrew/bin']:
-                    try:
-                        pages = convert_from_path(
-                            pdf_path,
-                            dpi=DPI,
-                            size=(MAX_WIDTH, None),
-                            poppler_path=poppler_path
-                        )
-                        return [resize_image(page) for page in pages]
-                    except:
-                        continue
-                raise Exception("Poppler not found in any standard location")
-            else:
-                raise e
+        # Try with each possible Poppler path
+        poppler_paths = [
+            None,  # Default path
+            '/usr/bin',
+            '/usr/local/bin',
+            '/opt/homebrew/bin',
+            '/usr/lib/x86_64-linux-gnu',
+            '/snap/bin'
+        ]
+
+        last_error = None
+        for poppler_path in poppler_paths:
+            try:
+                pages = convert_from_path(
+                    pdf_path,
+                    dpi=DPI,
+                    size=(MAX_WIDTH, None),
+                    poppler_path=poppler_path,
+                    use_pdftocairo=True,  # Try using pdftocairo first
+                )
+                return [resize_image(page) for page in pages]
+            except Exception as e:
+                last_error = e
+                continue
+                
+        raise Exception(f"Failed to convert PDF with error: {str(last_error)}")
             
-        return [resize_image(page) for page in pages]
     except Exception as e:
+        st.error("PDF conversion failed. Checking Poppler installation...")
+        # Try to detect poppler installation
+        if shutil.which('pdftoppm') is None and shutil.which('pdftocairo') is None:
+            st.error("""
+            Poppler is not installed or not found. Please wait while the system installs it.
+            If this persists, try:
+            1. Refreshing the page
+            2. Uploading a different PDF file
+            3. Contact support if the issue continues
+            """)
         raise Exception(f"PDF conversion failed: {str(e)}")
 
 def encode_image(image: Any) -> str:
@@ -120,36 +130,72 @@ def describe_image_with_vision(client: OpenAI, image: Any, page_num: int) -> str
                 "content": [
                     {
                         "type": "text",
-                        "text": """Extract ALL text from this document EXACTLY as it appears, with special attention to these rules:
+                        "text": """You are a text extraction tool. Your ONLY task is to extract ALL text from this document EXACTLY as it appears, with special attention to headers and tables. Follow these STRICT rules:
 
-1. Extract EVERY SINGLE character, word, number, and symbol exactly as shown
-2. Preserve ALL formatting, including:
-   - Line breaks and spacing
-   - Tables and their structure
-   - Headers and footers
-   - Page numbers and dates
-   - Lists and bullet points
-   - Special characters and symbols
+1. **Headers and Page Information**:
+   - Always extract headers at the top of pages
+   - Include page numbers, dates, or any other metadata
+   - Preserve header formatting and position
+   - Extract running headers and footers
 
-3. For tables:
-   - Keep exact cell contents
-   - Maintain column alignment
-   - Use ASCII characters for borders (│, ─, ┌, ┐, └, ┘)
-   - Preserve headers and labels
+2. **Table Handling**:
+   - Extract ALL table content cell by cell
+   - Maintain table structure using tabs or spaces
+   - Preserve column headers and row labels
    - Keep numerical data exactly as shown
+   - Include table borders and separators using ASCII characters
+   - Format multi-line cells accurately
 
-4. Mark special cases:
-   - [UNREADABLE] for unclear text
-   - [MERGED] for merged table cells
-   - [ROTATED] for vertical text
-   - [NO TEXT FOUND] for blank pages
+3. **Exact Text Only**: Extract every character, word, number, symbol, and punctuation mark exactly as it appears. Do NOT:
+   - Add any text not present in the document
+   - Remove any text present in the document
+   - Change any text present in the document
+   - Include any commentary, analysis, or interpretation
 
-5. DO NOT:
-   - Add any explanations or descriptions
-   - Skip any text, even if seems unimportant
-   - Rearrange or reorganize content
+4. **Preserve Formatting**: Maintain the exact:
+   - Line breaks and spacing
+   - Indentation and alignment
+   - Text styles (bold, italics, underline)
+   - Font sizes and styles
+   - Page layout and structure
+
+5. **Order and Structure**:
+   - Begin with page headers/metadata
+   - Follow the document's natural flow
+   - Extract text in reading order (top to bottom, left to right)
+   - Preserve paragraph breaks and section spacing
+   - Maintain hierarchical structure of headings
+
+6. **Table-Specific Output Format**:
+   - Use consistent spacing for columns
+   - Align numerical data properly
+   - Preserve column widths where possible
+   - Use ASCII characters for table borders (│, ─, ┌, ┐, └, ┘)
+   - Include table captions and notes
+
+7. **Special Elements**:
+   - Mark footnotes and endnotes appropriately
+   - Preserve bullet points and numbered lists
+   - Include figure captions and references
+   - Extract sidebar content in position
+
+8. **Clarity Rules**:
+   - Mark unclear text as [UNREADABLE]
+   - Indicate merged cells in tables with [MERGED]
+   - Note rotated or vertical text with [ROTATED]
+   - Flag complex formatting that can't be fully preserved
+
+9. **Strict Prohibitions**: Do NOT:
    - Summarize or paraphrase
-   - Make assumptions about unclear text
+   - Analyze or interpret content
+   - Rearrange table data
+   - Skip any text, even if it seems irrelevant
+   - Add explanations or descriptions
+   - Make assumptions about unclear content
+
+10. **Verification**: If the page is blank, return: "[NO TEXT FOUND]"
+
+Remember: Accuracy in headers and tables is CRITICAL. Extract EVERYTHING exactly as it appears.
 
 Extract the text exactly as it appears in the document:"""
                     },
@@ -225,6 +271,7 @@ def main():
 
         try:
             status_text.text("Converting PDF to images...")
+            st.info("Please try again with a different PDF file or contact support.")
             pages = convert_pdf_to_images(temp_pdf_path)
             total_pages = len(pages)
 
@@ -238,16 +285,6 @@ def main():
                 progress_bar.progress(progress)
                 status_text.text(f"Processing page {i + 1} of {total_pages}...")
                 
-                text = describe_image_with_vision(client, page, i)
-                extracted_texts.append(f"=== Page {i + 1} ===\n{text}")
-
-            final_text = "\n\n".join(extracted_texts)
-            progress_bar.progress(1.0)
-            status_text.text("Processing complete!")
-
-            st.success(f"Successfully processed {total_pages} pages!")
-
-            # Preview section
             with st.expander("Preview extracted text", expanded=True):
                 st.text_area("Extracted Text Preview", final_text, height=300)
 
@@ -262,6 +299,15 @@ def main():
         except Exception as e:
             st.error(f"Error: {str(e)}")
             st.info("Please try again with a different PDF file or contact support.")
+
+        finally:
+            try:
+                os.unlink(temp_pdf_path)
+            except Exception:
+                pass
+
+if __name__ == "__main__":
+    main()
 
         finally:
             try:
