@@ -1,3 +1,6 @@
-poppler-utils
+libpoppler-dev
+pdf2image
+pdftoppm
+poppler-data
 python3-dev
 build-essential
