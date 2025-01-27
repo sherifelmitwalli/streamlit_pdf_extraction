@@ -2,6 +2,7 @@ import os
 import base64
 import tempfile
 import warnings
+import shutil
 from io import BytesIO
 from pathlib import Path
 from typing import List, Any
@@ -158,7 +159,20 @@ Here is the document:"""
     except Exception as e:
         raise Exception(f"API Error: {str(e)}")
 
+def check_dependencies():
+    """Check if required system dependencies are installed"""
+    if not shutil.which('pdftoppm'):
+        st.error("""
+        Required system dependency 'poppler-utils' is not installed.
+        The application will install it automatically.
+        Please wait a moment and try again.
+        """)
+        st.stop()
+
 def main():
+    # Check dependencies first
+    check_dependencies()
+    
     st.set_page_config(page_title="PDF Text Extractor", page_icon="📄")
 
     st.title("PDF Text Extractor 📄")
