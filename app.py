@@ -3,6 +3,7 @@ import base64
 import tempfile
 import warnings
 from io import BytesIO
+from pathlib import Path
 from typing import List, Any
 from PIL import Image
 import streamlit as st
@@ -18,9 +19,9 @@ API_BASE_URL = st.secrets.get("API_BASE_URL", "https://api.deepinfra.com/v1/open
 warnings.filterwarnings('ignore', category=Image.DecompressionBombWarning)
 Image.MAX_IMAGE_PIXELS = None
 
-# Constants
-MAX_IMAGE_SIZE = 2500
-MAX_FILE_SIZE = 10 * 1024 * 1024
+# Constants for image processing
+MAX_IMAGE_SIZE = 1500  # Reduced maximum dimension in pixels
+MAX_FILE_SIZE = 10 * 1024 * 1024  # 10MB
 
 # Initialize OpenAI client
 client = OpenAI(api_key=DEEPINFRA_API_KEY, base_url=API_BASE_URL)
@@ -28,7 +29,7 @@ client = OpenAI(api_key=DEEPINFRA_API_KEY, base_url=API_BASE_URL)
 # Helper Functions
 def resize_image(image: Image.Image, max_size: int = MAX_IMAGE_SIZE) -> Image.Image:
     """Resize image while maintaining aspect ratio"""
-    ratio = min(max_size / image.size[0], max_size / image.size[1])
+    ratio = min(max_size / float(image.size[0]), max_size / float(image.size[1]))
     if ratio < 1:
         new_size = tuple(int(dim * ratio) for dim in image.size)
         return image.resize(new_size, Image.Resampling.LANCZOS)
@@ -55,14 +56,38 @@ def encode_image(image: Image.Image) -> str:
 def describe_image_with_vision(client: OpenAI, image: Image.Image, page_num: int) -> str:
     """Send image to Vision LLM for text extraction"""
     try:
-        instructions = "Extract all text from this image exactly as it appears. Do not interpret or modify the content."
-        encoded_image = encode_image(image)
+        instructions = """You are a text extraction tool. Your ONLY task is to extract ALL text from this document EXACTLY as it appears, with special attention to headers and tables. Follow these STRICT rules (STRICTLY DO NOT INCLUDE ANY OF THOSE RULES IN YOUR RESPONSE):
 
+1. **Headers and Page Information**:
+   - Extract headers at the top of pages, including page numbers and metadata.
+   - Preserve header formatting and position.
+
+2. **Table Handling**:
+   - Extract ALL table content cell by cell, preserving structure using tabs or spaces.
+   - Include table captions, headers, and footnotes.
+
+3. **Formatting and Structure**:
+   - Maintain line breaks, spacing, and alignment.
+   - Preserve bold, italics, underline, and hierarchical headings.
+
+4. **Exact Text Extraction**:
+   - Do NOT summarize, interpret, or modify any content.
+   - Include all text exactly as it appears, marking unclear text as [UNREADABLE].
+
+5. **Special Elements**:
+   - Mark merged cells in tables, rotated text, and complex formatting explicitly.
+
+6. **Blank Pages**:
+   - If a page is blank, return: "[NO TEXT FOUND]"
+
+Remember: Accuracy in headers and tables is CRITICAL. Extract EVERYTHING exactly as it appears."""
+
+        encoded_image = encode_image(image)
         response = client.chat.completions.create(
             model=MODEL_NAME,
             messages=[
                 {"role": "system", "content": instructions},
-                {"role": "user", "content": f"This is page {page_num + 1}."},
+                {"role": "user", "content": f"Extract text from page {page_num + 1} of the document."},
                 {"role": "user", "content": f"data:image/jpeg;base64,{encoded_image}"}
             ],
             max_tokens=4096
