@@ -10,6 +10,8 @@ from PIL import Image
 import streamlit as st
 from pdf2image import convert_from_path
 from openai import OpenAI
+import httpx
+from tenacity import retry, stop_after_attempt, wait_exponential
 
 # Load environment variables from Streamlit secrets
 DEEPINFRA_API_KEY = st.secrets["DEEPINFRA_API_KEY"]
@@ -26,8 +28,21 @@ MAX_FILE_SIZE = 10 * 1024 * 1024  # 10MB
 warnings.filterwarnings('ignore', category=Image.DecompressionBombWarning)
 Image.MAX_IMAGE_PIXELS = None
 
-# Initialize OpenAI client
-client = OpenAI(api_key=DEEPINFRA_API_KEY, base_url=API_BASE_URL)
+# Initialize OpenAI client with proper configuration
+try:
+    client = OpenAI(
+        api_key=DEEPINFRA_API_KEY,
+        base_url=API_BASE_URL,
+        http_client=httpx.Client(
+            timeout=60.0,
+            limits=httpx.Limits(max_keepalive_connections=5, max_connections=10),
+            follow_redirects=True
+        ),
+        max_retries=3
+    )
+except Exception as e:
+    st.error(f"Failed to initialize API client: {str(e)}")
+    st.stop()
 
 # Helper Functions from pdf_converter1.py
 def resize_image(image: Image.Image, max_size: int = MAX_IMAGE_SIZE) -> Image.Image:
@@ -65,84 +80,57 @@ def encode_image(image: Any) -> str:
     image.save(buffered, format="JPEG")
     return base64.b64encode(buffered.getvalue()).decode('utf-8')
 
+# Add retry decorator for API calls
+@retry(
+    stop=stop_after_attempt(3),
+    wait=wait_exponential(multiplier=1, min=4, max=10)
+)
 def describe_image_with_vision(client: OpenAI, image: Any, page_num: int) -> str:
     """Send image to vision model for text extraction"""
     try:
         response = client.chat.completions.create(
             model=MODEL_NAME,
             messages=[{
+                "role": "system",
+                "content": "You are a text extraction tool. Extract ALL text EXACTLY as shown in the image. Do NOT explain, interpret, or provide instructions. Only output the exact text found in the image."
+            },
+            {
                 "role": "user",
                 "content": [
                     {
                         "type": "text",
-                        "text": """You are a text extraction tool. Your ONLY task is to extract ALL text from this document EXACTLY as it appears, with special attention to headers and tables. Follow these STRICT rules:
+                        "text": """Extract ALL text from this document EXACTLY as it appears, with special attention to these rules:
 
-1. **Headers and Page Information**:
-   - Always extract headers at the top of pages
-   - Include page numbers, dates, or any other metadata
-   - Preserve header formatting and position
-   - Extract running headers and footers
-
-2. **Table Handling**:
-   - Extract ALL table content cell by cell
-   - Maintain table structure using tabs or spaces
-   - Preserve column headers and row labels
-   - Keep numerical data exactly as shown
-   - Include table borders and separators using ASCII characters
-   - Format multi-line cells accurately
-
-3. **Exact Text Only**: Extract every character, word, number, symbol, and punctuation mark exactly as it appears. Do NOT:
-   - Add any text not present in the document
-   - Remove any text present in the document
-   - Change any text present in the document
-   - Include any commentary, analysis, or interpretation
-
-4. **Preserve Formatting**: Maintain the exact:
+1. Extract EVERY SINGLE character, word, number, and symbol exactly as shown
+2. Preserve ALL formatting, including:
    - Line breaks and spacing
-   - Indentation and alignment
-   - Text styles (bold, italics, underline)
-   - Font sizes and styles
-   - Page layout and structure
+   - Tables and their structure
+   - Headers and footers
+   - Page numbers and dates
+   - Lists and bullet points
+   - Special characters and symbols
 
-5. **Order and Structure**:
-   - Begin with page headers/metadata
-   - Follow the document's natural flow
-   - Extract text in reading order (top to bottom, left to right)
-   - Preserve paragraph breaks and section spacing
-   - Maintain hierarchical structure of headings
+3. For tables:
+   - Keep exact cell contents
+   - Maintain column alignment
+   - Use ASCII characters for borders (│, ─, ┌, ┐, └, ┘)
+   - Preserve headers and labels
+   - Keep numerical data exactly as shown
 
-6. **Table-Specific Output Format**:
-   - Use consistent spacing for columns
-   - Align numerical data properly
-   - Preserve column widths where possible
-   - Use ASCII characters for table borders (│, ─, ┌, ┐, └, ┘)
-   - Include table captions and notes
+4. Mark special cases:
+   - [UNREADABLE] for unclear text
+   - [MERGED] for merged table cells
+   - [ROTATED] for vertical text
+   - [NO TEXT FOUND] for blank pages
 
-7. **Special Elements**:
-   - Mark footnotes and endnotes appropriately
-   - Preserve bullet points and numbered lists
-   - Include figure captions and references
-   - Extract sidebar content in position
-
-8. **Clarity Rules**:
-   - Mark unclear text as [UNREADABLE]
-   - Indicate merged cells in tables
-   - Note rotated or vertical text
-   - Flag complex formatting that can't be fully preserved
-
-9. **Strict Prohibitions**: Do NOT:
+5. DO NOT:
+   - Add any explanations or descriptions
+   - Skip any text, even if seems unimportant
+   - Rearrange or reorganize content
    - Summarize or paraphrase
-   - Analyze or interpret content
-   - Rearrange table data
-   - Skip any text, even if it seems irrelevant
-   - Add explanations or descriptions
-   - Make assumptions about unclear content
+   - Make assumptions about unclear text
 
-10. **Verification**: If the page is blank, return: "[NO TEXT FOUND]"
-
-Remember: Accuracy in headers and tables is CRITICAL. Extract EVERYTHING exactly as it appears.
-
-Here is the document:"""
+Extract the text exactly as it appears in the document:"""
                     },
                     {
                         "type": "image_url",
@@ -152,8 +140,8 @@ Here is the document:"""
                     }
                 ]
             }],
-            max_tokens=8192,  # Increased for longer documents
-            temperature=0.3   # Balanced between accuracy and creativity
+            max_tokens=8192,
+            temperature=0.3
         )
         return response.choices[0].message.content
     except Exception as e:
@@ -170,6 +158,13 @@ def check_dependencies():
         st.stop()
 
 def main():
+    try:
+        # Validate API connection
+        client.models.list()  # Simple API call to test connection
+    except Exception as e:
+        st.error("Failed to connect to API. Please check your credentials and connection.")
+        st.stop()
+        
     # Check dependencies first
     check_dependencies()
     
